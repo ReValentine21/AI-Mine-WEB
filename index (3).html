@@ -1,0 +1,719 @@
+<meta name='viewport' content='width=device-width, initial-scale=1'/><!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Voxel Horror: Premium Glass Edition</title>
+    <style>
+        :root {
+            --glass-bg: rgba(20, 20, 25, 0.45);
+            --glass-border: rgba(255, 255, 255, 0.15);
+            --neon-accent: #00f3ff;
+            --neon-glow: 0 0 15px rgba(0, 243, 255, 0.5);
+        }
+
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        #gameCanvas { display: block; width: 100%; height: 100%; }
+        
+        /* Ультра-премиум UI: Glassmorphism */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .crosshair { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: rgba(255,255,255,0.8); border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 10px #fff; }
+        
+        .hud-panel {
+            position: absolute; bottom: 30px; left: 30px; width: 280px;
+            background: var(--glass-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border); border-radius: 16px; padding: 15px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .bar { height: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; margin-bottom: 10px; overflow: hidden; position: relative; }
+        .bar:last-child { margin-bottom: 0; }
+        .bar-fill { height: 100%; transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+        #health-fill { background: linear-gradient(90deg, #ff416c, #ff4b2b); width: 100%; box-shadow: 0 0 10px #ff416c; }
+        #stamina-fill { background: linear-gradient(90deg, #00b4db, #0083b0); width: 100%; }
+
+        #stats {
+            position: absolute; top: 20px; right: 20px;
+            background: var(--glass-bg); backdrop-filter: blur(12px); border: 1px solid var(--glass-border);
+            border-radius: 12px; padding: 15px; color: #fff; text-align: right; font-size: 14px;
+        }
+
+        /* Инвентарь */
+        #inventory-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+            display: none; align-items: center; justify-content: center; flex-direction: column;
+            pointer-events: auto; z-index: 100;
+        }
+        .inv-container {
+            background: rgba(30, 30, 40, 0.6); backdrop-filter: blur(20px); border: 1px solid var(--glass-border);
+            border-radius: 24px; padding: 30px; box-shadow: 0 15px 50px rgba(0,0,0,0.5);
+            display: flex; flex-direction: column; gap: 20px;
+        }
+        .inv-row { display: flex; gap: 8px; }
+        .slot {
+            width: 48px; height: 48px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; position: relative; color: white; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .slot:hover { background: rgba(255,255,255,0.15); box-shadow: var(--neon-glow); border-color: var(--neon-accent); }
+        .slot.active { border-color: var(--neon-accent); box-shadow: var(--neon-glow); background: rgba(0, 243, 255, 0.1); }
+        .slot .count { position: absolute; bottom: 2px; right: 4px; font-size: 12px; font-weight: bold; text-shadow: 1px 1px 2px #000; pointer-events: none; }
+        .crafting-area { display: flex; gap: 30px; align-items: center; }
+        .crafting-grid { display: grid; grid-template-columns: repeat(2, 48px); gap: 8px; }
+        .inv-title { color: #fff; font-size: 14px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.8; }
+
+        /* Хотбар */
+        #hotbar {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 8px; background: var(--glass-bg); backdrop-filter: blur(12px);
+            padding: 10px; border-radius: 16px; border: 1px solid var(--glass-border); pointer-events: auto; z-index: 10;
+        }
+
+        /* Главное меню */
+        #start-screen {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: radial-gradient(circle at center, #111 0%, #000 100%);
+            display:flex; align-items:center; justify-content:center; flex-direction:column;
+            z-index: 200; cursor: pointer; color: white;
+        }
+        .start-btn {
+            background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2); border-radius: 30px;
+            padding: 15px 40px; font-size: 24px; color: #fff; letter-spacing: 2px;
+            transition: 0.3s; box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .start-btn:hover { background: rgba(255, 255, 255, 0.1); box-shadow: 0 0 30px rgba(0, 243, 255, 0.4); border-color: var(--neon-accent); }
+
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; transition: all 0.5s; z-index: 5; }
+        .damage-flash { background: rgba(255, 0, 0, 0.3); }
+        .distortion { backdrop-filter: blur(6px) contrast(120%); box-shadow: inset 0 0 200px rgba(0,0,0,0.9); }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<div id="start-screen">
+    <h1 style="font-size: 64px; text-shadow: 0 0 20px rgba(255,0,0,0.8); margin-bottom: 10px;">LENS GLASS: HORROR</h1>
+    <p style="opacity: 0.7; margin-bottom: 40px;">Кликните по кнопке, чтобы начать. Esc - Меню/Инвентарь</p>
+    <div class="start-btn" id="start-btn">НАЧАТЬ ИГРУ</div>
+</div>
+
+<div id="ui-layer">
+    <div class="crosshair"></div>
+    <div class="hud-panel">
+        <div class="bar"><div class="bar-fill" id="health-fill"></div></div>
+        <div class="bar"><div class="bar-fill" id="stamina-fill"></div></div>
+    </div>
+    <div id="stats">
+        <span style="color:var(--neon-accent)" id="time-display">День</span><br><br>
+        Монстр рядом: <span id="noticed-count">0</span> раз<br>
+    </div>
+</div>
+
+<div id="hotbar"></div>
+
+<div id="inventory-screen">
+    <div class="inv-container">
+        <div class="crafting-area">
+            <div>
+                <div class="inv-title">Сборка (2x2)</div>
+                <div class="crafting-grid" id="craft-grid"></div>
+            </div>
+            <div style="font-size: 24px; color: rgba(255,255,255,0.5);">→</div>
+            <div>
+                <div class="inv-title">Итог</div>
+                <div class="slot" id="craft-result" style="width: 64px; height: 64px;"></div>
+            </div>
+        </div>
+        <div>
+            <div class="inv-title">Хранилище</div>
+            <div id="inv-main"></div>
+        </div>
+    </div>
+</div>
+
+<div id="overlay"></div>
+
+<script>
+// ==========================================
+// 1. БАЗОВЫЕ НАСТРОЙКИ И ДАННЫЕ
+// ==========================================
+const WORLD_SIZE = { x: 128, y: 64, z: 128 };
+// Блоки. Добавил NEON_ORE для атмосферы.
+const BLOCKS = { AIR: 0, DIRT: 1, GRASS: 2, STONE: 3, WOOD: 4, LEAVES: 5, PLANKS: 6, NEON_ORE: 7 };
+
+let seed = Math.random();
+function random() { let x = Math.sin(seed++) * 10000; return x - Math.floor(x); }
+function noise(x, z) { return (Math.sin(x*0.05) + Math.sin(z*0.05) + Math.sin((x+z)*0.03)*0.5) * 5 + 35; }
+
+// ==========================================
+// 2. ГЕНЕРАТОР ТЕКСТУР И МАТЕРИАЛОВ (Светящиеся)
+// ==========================================
+function createTex(type) {
+    let canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16;
+    let ctx = canvas.getContext('2d');
+    let c1, c2;
+    if(type===BLOCKS.DIRT) { c1='#3e2723'; c2='#4e342e'; }
+    if(type===BLOCKS.GRASS) { c1='#2e7d32'; c2='#1b5e20'; }
+    if(type===BLOCKS.STONE) { c1='#424242'; c2='#616161'; }
+    if(type===BLOCKS.WOOD) { c1='#211512'; c2='#3e2723'; }
+    if(type===BLOCKS.LEAVES) { c1='#0d3b10'; c2='#145a14'; }
+    if(type===BLOCKS.PLANKS) { c1='#5d4037'; c2='#795548'; }
+    if(type===BLOCKS.NEON_ORE) { c1='#111'; c2='#00f3ff'; } // Неоновая руда
+    
+    ctx.fillStyle = c1; ctx.fillRect(0,0,16,16);
+    ctx.fillStyle = c2;
+    for(let i=0; i<20; i++) {
+        let x=Math.floor(Math.random()*16), y=Math.floor(Math.random()*16);
+        ctx.fillRect(x,y, type===BLOCKS.NEON_ORE ? 3 : 2, type===BLOCKS.NEON_ORE ? 3 : 2);
+    }
+    if(type===BLOCKS.GRASS) { ctx.fillStyle='#3e2723'; ctx.fillRect(0,8,16,8); }
+    
+    let tex = new THREE.CanvasTexture(canvas);
+    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+    return tex;
+}
+
+const materials = {};
+[BLOCKS.DIRT, BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.PLANKS].forEach(id => {
+    materials[id] = new THREE.MeshStandardMaterial({ map: createTex(id), roughness: 0.8 });
+});
+// Светящийся материал для неоновой руды
+materials[BLOCKS.NEON_ORE] = new THREE.MeshStandardMaterial({ 
+    map: createTex(BLOCKS.NEON_ORE), emissive: 0x00f3ff, emissiveIntensity: 0.5 
+});
+
+// ==========================================
+// 3. ОСНОВНОЙ ДВИЖОК
+// ==========================================
+class Engine {
+    constructor() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x050510);
+        this.scene.fog = new THREE.FogExp2(0x050510, 0.03);
+        
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
+        this.renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: true });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        // Свет
+        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        this.scene.add(this.ambientLight);
+        this.dirLight = new THREE.DirectionalLight(0xaaccff, 0.5);
+        this.dirLight.position.set(50, 100, 50);
+        this.scene.add(this.dirLight);
+
+        this.world = new Uint8Array(WORLD_SIZE.x * WORLD_SIZE.y * WORLD_SIZE.z);
+        this.instancedMeshes = {};
+        this.geo = new THREE.BoxGeometry(1, 1, 1);
+        
+        this.initWorld();
+        
+        this.player = new Player(this);
+        this.inventory = new Inventory(this);
+        this.monster = new Monster(this);
+        
+        this.clock = new THREE.Clock();
+        this.running = false;
+        
+        this.setupPointerLock();
+        
+        window.addEventListener('resize', () => {
+            this.camera.aspect = window.innerWidth / window.innerHeight;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    }
+
+    // Кастомный, надежный PointerLock (решает проблему с одновременным движением и вращением камеры)
+    setupPointerLock() {
+        this.pitchObject = new THREE.Object3D();
+        this.pitchObject.add(this.camera);
+        this.yawObject = new THREE.Object3D();
+        this.yawObject.position.set(64, 50, 64);
+        this.yawObject.add(this.pitchObject);
+        this.scene.add(this.yawObject);
+
+        const startBtn = document.getElementById('start-btn');
+        const startScreen = document.getElementById('start-screen');
+        const invScreen = document.getElementById('inventory-screen');
+
+        startBtn.addEventListener('click', () => {
+            document.body.requestPointerLock();
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement === document.body) {
+                startScreen.style.display = 'none';
+                invScreen.style.display = 'none';
+                this.running = true;
+            } else {
+                // Если вышли (нажали Esc)
+                this.running = false;
+                startScreen.style.display = 'flex';
+                // Делаем меню полупрозрачным, чтобы было видно паузу
+                startScreen.style.background = 'rgba(0,0,0,0.7)'; 
+                startScreen.querySelector('h1').innerText = "ПАУЗА";
+                startBtn.innerText = "ПРОДОЛЖИТЬ";
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (this.running) {
+                let movementX = e.movementX || 0;
+                let movementY = e.movementY || 0;
+                this.yawObject.rotation.y -= movementX * 0.002;
+                this.pitchObject.rotation.x -= movementY * 0.002;
+                // Ограничение по вертикали
+                this.pitchObject.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.pitchObject.rotation.x));
+            }
+        });
+        
+        // Открытие инвентаря на E
+        document.addEventListener('keydown', (e) => {
+            if(e.code === 'KeyE' && this.running) {
+                document.exitPointerLock();
+                invScreen.style.display = 'flex';
+                startScreen.style.display = 'none'; // Скрываем паузу
+                this.inventory.render();
+            }
+        });
+    }
+
+    getIndex(x, y, z) { return x + WORLD_SIZE.x * (y + WORLD_SIZE.y * z); }
+    getBlock(x, y, z) {
+        if(x<0||y<0||z<0||x>=WORLD_SIZE.x||y>=WORLD_SIZE.y||z>=WORLD_SIZE.z) return 0;
+        return this.world[this.getIndex(x,y,z)];
+    }
+    setBlock(x, y, z, v) {
+        if(x<0||y<0||z<0||x>=WORLD_SIZE.x||y>=WORLD_SIZE.y||z>=WORLD_SIZE.z) return;
+        this.world[this.getIndex(x,y,z)] = v;
+        this.buildMeshes(); // Перестраиваем (оптимизировано через инстансы)
+    }
+
+    initWorld() {
+        for (let x = 0; x < WORLD_SIZE.x; x++) {
+            for (let z = 0; z < WORLD_SIZE.z; z++) {
+                let h = Math.floor(noise(x, z));
+                for (let y = 0; y < WORLD_SIZE.y; y++) {
+                    let type = BLOCKS.AIR;
+                    if (y === 0) type = BLOCKS.STONE;
+                    else if (y < h - 3) type = (Math.random() > 0.98) ? BLOCKS.NEON_ORE : BLOCKS.STONE;
+                    else if (y < h) type = BLOCKS.DIRT;
+                    else if (y === h) type = BLOCKS.GRASS;
+                    
+                    // Пещеры
+                    if (y < h - 5 && Math.random() > 0.85) type = BLOCKS.AIR;
+                    this.world[this.getIndex(x, y, z)] = type;
+                }
+                // Деревья
+                if (this.getBlock(x, h, z) === BLOCKS.GRASS && Math.random() > 0.98) {
+                    for(let ty=1; ty<=4; ty++) this.world[this.getIndex(x, h+ty, z)] = BLOCKS.WOOD;
+                    for(let lx=-1; lx<=1; lx++) for(let lz=-1; lz<=1; lz++) {
+                        if(x+lx>0 && x+lx<WORLD_SIZE.x && z+lz>0 && z+lz<WORLD_SIZE.z) {
+                            this.world[this.getIndex(x+lx, h+4, z+lz)] = BLOCKS.LEAVES;
+                        }
+                    }
+                }
+            }
+        }
+        this.buildMeshes();
+    }
+
+    buildMeshes() {
+        for(let key in this.instancedMeshes) this.scene.remove(this.instancedMeshes[key].mesh);
+        this.instancedMeshes = {};
+        
+        let counts = {};
+        for(let i=0; i<this.world.length; i++) {
+            let id = this.world[i];
+            if(id !== BLOCKS.AIR) counts[id] = (counts[id]||0) + 1;
+        }
+
+        let matrix = new THREE.Matrix4();
+        for(let id in counts) {
+            if(!materials[id]) continue;
+            let mesh = new THREE.InstancedMesh(this.geo, materials[id], counts[id]);
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            this.instancedMeshes[id] = { mesh: mesh, index: 0 };
+            this.scene.add(mesh);
+        }
+
+        for (let x = 0; x < WORLD_SIZE.x; x++) {
+            for (let y = 0; y < WORLD_SIZE.y; y++) {
+                for (let z = 0; z < WORLD_SIZE.z; z++) {
+                    let id = this.getBlock(x, y, z);
+                    if (id !== BLOCKS.AIR && materials[id]) {
+                        // Culling
+                        let visible = !(this.getBlock(x+1,y,z) && this.getBlock(x-1,y,z) &&
+                                        this.getBlock(x,y+1,z) && this.getBlock(x,y-1,z) &&
+                                        this.getBlock(x,y,z+1) && this.getBlock(x,y,z-1));
+                        
+                        let inst = this.instancedMeshes[id];
+                        if(visible) {
+                            matrix.setPosition(x, y, z);
+                            inst.mesh.setMatrixAt(inst.index, matrix);
+                        } else {
+                            matrix.makeScale(0,0,0);
+                            inst.mesh.setMatrixAt(inst.index, matrix);
+                        }
+                        inst.index++;
+                    }
+                }
+            }
+        }
+        for(let id in this.instancedMeshes) this.instancedMeshes[id].mesh.instanceMatrix.needsUpdate = true;
+    }
+
+    animate() {
+        requestAnimationFrame(() => this.animate());
+        let dt = Math.min(this.clock.getDelta(), 0.1);
+
+        if(this.running) {
+            this.player.update(dt);
+            this.monster.update(dt);
+        }
+        
+        // Анимация свечения неоновой руды
+        materials[BLOCKS.NEON_ORE].emissiveIntensity = 0.5 + Math.sin(this.clock.elapsedTime * 2) * 0.3;
+
+        this.renderer.render(this.scene, this.camera);
+    }
+}
+
+// ==========================================
+// 4. ИГРОК
+// ==========================================
+class Player {
+    constructor(app) {
+        this.app = app;
+        this.velocity = new THREE.Vector3();
+        this.keys = { w:false, a:false, s:false, d:false, space:false, shift:false };
+        this.onGround = false;
+        
+        this.hp = 100;
+        this.stamina = 100;
+
+        document.addEventListener('keydown', e => this.onKey(e, true));
+        document.addEventListener('keyup', e => this.onKey(e, false));
+        document.addEventListener('mousedown', e => this.onClick(e));
+        
+        // Спавн
+        let sy = 60;
+        while(this.app.getBlock(64, sy, 64) === 0 && sy > 0) sy--;
+        this.app.yawObject.position.set(64, sy + 2, 64);
+    }
+
+    onKey(e, state) {
+        switch(e.code) {
+            case 'KeyW': this.keys.w = state; break;
+            case 'KeyA': this.keys.a = state; break;
+            case 'KeyS': this.keys.s = state; break;
+            case 'KeyD': this.keys.d = state; break;
+            case 'Space': this.keys.space = state; break;
+            case 'ShiftLeft': this.keys.shift = state; break;
+        }
+        if(state && e.key >= '1' && e.key <= '9') {
+            this.app.inventory.activeHotbar = parseInt(e.key) - 1;
+            this.app.inventory.renderHotbar();
+        }
+    }
+
+    onClick(e) {
+        if(!this.app.running) {
+            // Клик в инвентаре обрабатывается отдельно
+            return;
+        }
+        
+        let raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(0,0), this.app.camera);
+        
+        let pos = raycaster.ray.origin.clone();
+        let dir = raycaster.ray.direction.clone();
+        let hit = null, norm = null, prevPos = null;
+        
+        for(let i=0; i<6; i+=0.1) {
+            let p = pos.clone().addScaledVector(dir, i);
+            let x = Math.floor(p.x + 0.5), y = Math.floor(p.y + 0.5), z = Math.floor(p.z + 0.5);
+            let b = this.app.getBlock(x, y, z);
+            if(b !== BLOCKS.AIR) {
+                hit = {x, y, z, id:b};
+                if(prevPos) norm = { x: Math.floor(prevPos.x+0.5)-x, y: Math.floor(prevPos.y+0.5)-y, z: Math.floor(prevPos.z+0.5)-z };
+                break;
+            }
+            prevPos = p;
+        }
+
+        if(hit) {
+            if(e.button === 0) { // ЛКМ - ломать
+                this.app.inventory.add(hit.id, 1);
+                this.app.setBlock(hit.x, hit.y, hit.z, BLOCKS.AIR);
+            } else if(e.button === 2 && norm) { // ПКМ - ставить
+                let item = this.app.inventory.getEquipped();
+                if(item) {
+                    this.app.setBlock(hit.x + norm.x, hit.y + norm.y, hit.z + norm.z, item.id);
+                    this.app.inventory.consumeActive();
+                }
+            }
+        }
+    }
+
+    checkCollision(pos) {
+        let x = Math.floor(pos.x + 0.5), y = Math.floor(pos.y), z = Math.floor(pos.z + 0.5);
+        if(this.app.getBlock(x, y, z) || this.app.getBlock(x, y+1, z)) return true;
+        return false;
+    }
+
+    damage(val) {
+        this.hp -= val;
+        document.getElementById('health-fill').style.width = this.hp + '%';
+        document.getElementById('overlay').classList.add('damage-flash');
+        setTimeout(() => document.getElementById('overlay').classList.remove('damage-flash'), 200);
+        if(this.hp <= 0) {
+            this.hp = 100;
+            this.app.yawObject.position.set(64, 60, 64);
+        }
+    }
+
+    update(dt) {
+        let yaw = this.app.yawObject;
+        let pos = yaw.position;
+        
+        this.velocity.x -= this.velocity.x * 10.0 * dt;
+        this.velocity.z -= this.velocity.z * 10.0 * dt;
+        this.velocity.y -= 9.8 * 2.0 * dt;
+
+        let isRunning = this.keys.shift && this.keys.w;
+        let speed = isRunning ? 8 : 4;
+        
+        if(isRunning) {
+            this.stamina -= dt * 15;
+            if(this.stamina <= 0) { this.stamina = 0; speed = 4; }
+        } else {
+            this.stamina += dt * 10;
+            if(this.stamina > 100) this.stamina = 100;
+        }
+        document.getElementById('stamina-fill').style.width = this.stamina + '%';
+
+        // Движение относительно поворота камеры
+        let direction = new THREE.Vector3();
+        direction.z = Number(this.keys.w) - Number(this.keys.s);
+        direction.x = Number(this.keys.d) - Number(this.keys.a);
+        direction.normalize();
+
+        if (direction.lengthSq() > 0) {
+            // Преобразуем локальные координаты в глобальные с учетом поворота
+            let dirGlobal = direction.clone().applyEuler(new THREE.Euler(0, yaw.rotation.y, 0));
+            this.velocity.x -= dirGlobal.x * speed * dt * 40.0;
+            this.velocity.z -= dirGlobal.z * speed * dt * 40.0;
+        }
+
+        if(this.keys.space && this.onGround) {
+            this.velocity.y = 8; this.onGround = false;
+        }
+
+        // Применяем скорость (по осям отдельно для коллизий)
+        pos.x += this.velocity.x * dt;
+        if(this.checkCollision(pos)) { pos.x -= this.velocity.x * dt; this.velocity.x = 0; }
+        
+        pos.z += this.velocity.z * dt;
+        if(this.checkCollision(pos)) { pos.z -= this.velocity.z * dt; this.velocity.z = 0; }
+        
+        pos.y += this.velocity.y * dt;
+        if(this.checkCollision(pos)) {
+            pos.y -= this.velocity.y * dt;
+            this.velocity.y = 0;
+            this.onGround = true;
+        } else {
+            this.onGround = false;
+        }
+    }
+}
+
+// ==========================================
+// 5. ИНВЕНТАРЬ СО GLASSMORPHISM
+// ==========================================
+class Inventory {
+    constructor(app) {
+        this.app = app;
+        this.slots = new Array(36).fill(null);
+        this.craftSlots = new Array(4).fill(null);
+        this.activeHotbar = 0;
+        
+        this.add(BLOCKS.WOOD, 20);
+        this.add(BLOCKS.NEON_ORE, 5);
+        this.initUI();
+    }
+
+    add(id, count) {
+        for(let i=0; i<this.slots.length; i++) {
+            if(this.slots[i] && this.slots[i].id === id && this.slots[i].count < 64) {
+                let add = Math.min(count, 64 - this.slots[i].count);
+                this.slots[i].count += add;
+                count -= add;
+                if(count <= 0) return;
+            }
+        }
+        for(let i=0; i<this.slots.length; i++) {
+            if(!this.slots[i]) { this.slots[i] = { id: id, count: count }; return; }
+        }
+    }
+
+    getEquipped() { return this.slots[this.activeHotbar]; }
+    consumeActive() {
+        if(this.slots[this.activeHotbar]) {
+            this.slots[this.activeHotbar].count--;
+            if(this.slots[this.activeHotbar].count <= 0) this.slots[this.activeHotbar] = null;
+            this.renderHotbar();
+        }
+    }
+
+    initUI() {
+        let main = document.getElementById('inv-main');
+        for(let i=0; i<4; i++) {
+            let row = document.createElement('div'); row.className = 'inv-row';
+            for(let j=0; j<9; j++) {
+                let idx = i*9 + j;
+                let slot = document.createElement('div'); slot.className = 'slot';
+                slot.onclick = () => this.slotClick('main', idx);
+                row.appendChild(slot);
+            }
+            main.appendChild(row);
+        }
+        let craft = document.getElementById('craft-grid');
+        for(let i=0; i<4; i++) {
+            let slot = document.createElement('div'); slot.className = 'slot';
+            slot.onclick = () => this.slotClick('craft', i);
+            craft.appendChild(slot);
+        }
+        this.selectedBuffer = null;
+    }
+
+    slotClick(type, idx) {
+        let arr = type === 'main' ? this.slots : this.craftSlots;
+        if(this.selectedBuffer) {
+            if(!arr[idx]) arr[idx] = this.selectedBuffer;
+            else if(arr[idx].id === this.selectedBuffer.id) arr[idx].count += this.selectedBuffer.count;
+            else { let temp = arr[idx]; arr[idx] = this.selectedBuffer; this.selectedBuffer = temp; return; }
+            this.selectedBuffer = null;
+        } else {
+            if(arr[idx]) { this.selectedBuffer = arr[idx]; arr[idx] = null; }
+        }
+        this.render();
+    }
+
+    getColor(id) {
+        let m = { [BLOCKS.DIRT]:'#4e342e', [BLOCKS.STONE]:'#616161', [BLOCKS.WOOD]:'#3e2723', [BLOCKS.PLANKS]:'#795548', [BLOCKS.NEON_ORE]:'#00f3ff' };
+        return m[id] || '#fff';
+    }
+
+    render() {
+        let mainRows = document.getElementById('inv-main').children;
+        for(let i=0; i<36; i++) {
+            let row = Math.floor(i/9), col = i%9;
+            let div = mainRows[row].children[col];
+            let isNeon = this.slots[i] && this.slots[i].id === BLOCKS.NEON_ORE;
+            div.innerHTML = this.slots[i] ? `<div style="background:${this.getColor(this.slots[i].id)}; width:60%; height:60%; border-radius:4px; box-shadow: ${isNeon?'0 0 10px #00f3ff':'none'}"></div><span class="count">${this.slots[i].count}</span>` : '';
+            div.style.borderColor = (this.selectedBuffer && !this.slots[i]) ? 'rgba(0,243,255,0.5)' : '';
+        }
+        let craftGrid = document.getElementById('craft-grid').children;
+        for(let i=0; i<4; i++) {
+            let isNeon = this.craftSlots[i] && this.craftSlots[i].id === BLOCKS.NEON_ORE;
+            craftGrid[i].innerHTML = this.craftSlots[i] ? `<div style="background:${this.getColor(this.craftSlots[i].id)}; width:60%; height:60%; border-radius:4px; box-shadow: ${isNeon?'0 0 10px #00f3ff':'none'}"></div><span class="count">${this.craftSlots[i].count}</span>` : '';
+        }
+        this.renderHotbar();
+    }
+
+    renderHotbar() {
+        let hb = document.getElementById('hotbar');
+        hb.innerHTML = '';
+        for(let i=0; i<9; i++) {
+            let slot = document.createElement('div');
+            slot.className = 'slot' + (i === this.activeHotbar ? ' active' : '');
+            if(this.slots[i]) {
+                let isNeon = this.slots[i].id === BLOCKS.NEON_ORE;
+                slot.innerHTML = `<div style="background:${this.getColor(this.slots[i].id)}; width:60%; height:60%; border-radius:4px; box-shadow: ${isNeon?'0 0 10px #00f3ff':'none'}"></div><span class="count">${this.slots[i].count}</span>`;
+            }
+            hb.appendChild(slot);
+        }
+    }
+}
+
+// ==========================================
+// 6. МОНСТР (Обновленный, с красным свечением)
+// ==========================================
+class Monster {
+    constructor(app) {
+        this.app = app;
+        this.mesh = new THREE.Group();
+        
+        let mat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 1 });
+        this.body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2, 0.8), mat);
+        this.body.position.y = 1;
+        this.mesh.add(this.body);
+        
+        // Светящиеся глаза
+        let eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        this.eyes = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 0.1), eyeMat);
+        this.eyes.position.set(0, 1.8, 0.45);
+        this.mesh.add(this.eyes);
+
+        // Жуткий красный свет от монстра
+        this.light = new THREE.PointLight(0xff0000, 1, 10);
+        this.light.position.set(0, 1.8, 0.5);
+        this.mesh.add(this.light);
+        
+        this.app.scene.add(this.mesh);
+        this.mesh.position.set(40, 65, 40);
+        
+        this.speed = 2.0;
+        this.noticed = 0;
+    }
+
+    update(dt) {
+        let pPos = this.app.yawObject.position;
+        let mPos = this.mesh.position;
+        let dist = mPos.distanceTo(pPos);
+        
+        if(dist < 30) {
+            let dir = pPos.clone().sub(mPos).normalize();
+            
+            // Если игрок смотрит на монстра (через камеру)
+            let pDir = new THREE.Vector3(0,0,-1).applyQuaternion(this.app.camera.getWorldQuaternion(new THREE.Quaternion()));
+            let isLooking = pDir.dot(dir.clone().negate()) > 0.8;
+            
+            if(isLooking) this.speed = 4.0; else this.speed = 2.0;
+
+            if(dist > 2) {
+                // Движение
+                mPos.add(dir.multiplyScalar(this.speed * dt));
+                this.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+                
+                // Искажение экрана (Glassmorphism эффект)
+                if(dist < 10) document.getElementById('overlay').classList.add('distortion');
+                else document.getElementById('overlay').classList.remove('distortion');
+            } else {
+                this.app.player.damage(30);
+                // Телепорт монстра после удара, чтобы не убил сразу
+                this.mesh.position.set(pPos.x + (Math.random()-0.5)*40, 60, pPos.z + (Math.random()-0.5)*40);
+                this.noticed++;
+                document.getElementById('noticed-count').innerText = this.noticed;
+            }
+
+            // Простая гравитация монстра
+            let floorY = Math.floor(mPos.y);
+            while(this.app.getBlock(Math.floor(mPos.x), floorY, Math.floor(mPos.z)) === 0 && floorY > 0) floorY--;
+            mPos.y = floorY + 1;
+        } else {
+            document.getElementById('overlay').classList.remove('distortion');
+        }
+    }
+}
+
+const app = new Engine();
+app.animate();
+
+</script>
+</body>
+</html>
