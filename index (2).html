@@ -1,0 +1,1026 @@
+<meta name='viewport' content='width=device-width, initial-scale=1'/><!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Voxel Horror: Survive the Night</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; user-select: none; }
+        #gameCanvas { display: block; width: 100%; height: 100%; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); color: rgba(255,255,255,0.7); font-size: 20px; line-height: 20px; text-align: center; }
+        .bar-container { position: absolute; bottom: 20px; left: 20px; width: 300px; }
+        .bar { height: 15px; background: #333; margin-bottom: 5px; border: 1px solid #000; position: relative; }
+        .bar-fill { height: 100%; transition: width 0.2s; }
+        #health-fill { background: #d32f2f; width: 100%; }
+        #breath-fill { background: #1976d2; width: 100%; display: none; }
+        #stamina-fill { background: #fbc02d; width: 100%; }
+        #hotbar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; background: rgba(0,0,0,0.5); padding: 4px; border: 2px solid #555; pointer-events: auto; }
+        .slot { width: 40px; height: 40px; background: rgba(255,255,255,0.2); border: 2px solid #888; position: relative; color: white; text-align: right; font-size: 12px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; }
+        .slot.active { border-color: #fff; background: rgba(255,255,255,0.4); }
+        .slot img { width: 32px; height: 32px; image-rendering: pixelated; pointer-events: none; }
+        .slot .count { position: absolute; bottom: 2px; right: 4px; pointer-events: none; }
+        
+        #inventory-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; flex-direction: column; pointer-events: auto; z-index: 100; }
+        .inv-container { background: #c6c6c6; padding: 10px; border: 4px solid #555; display: flex; flex-direction: column; gap: 10px; }
+        .inv-row { display: flex; gap: 2px; }
+        .crafting-area { display: flex; gap: 20px; align-items: center; margin-bottom: 20px; }
+        .crafting-grid { display: grid; grid-template-columns: repeat(2, 44px); gap: 2px; }
+        .craft-arrow { font-size: 24px; font-weight: bold; }
+        .inv-title { font-weight: bold; color: #333; margin-bottom: 4px; }
+        
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; transition: all 0.5s; z-index: 10; }
+        .vignette { box-shadow: inset 0 0 150px rgba(0,0,0,0.9); }
+        .water-overlay { background: rgba(0, 50, 150, 0.4); backdrop-filter: blur(2px); }
+        .distortion { backdrop-filter: blur(4px) hue-rotate(90deg) contrast(150%); }
+        .damage-flash { background: rgba(255, 0, 0, 0.4); }
+        
+        #stats { position: absolute; top: 10px; right: 10px; color: #fff; text-align: right; background: rgba(0,0,0,0.5); padding: 5px; }
+        #start-screen { position: absolute; top:0; left:0; width:100%; height:100%; background:#000; color:#f00; display:flex; align-items:center; justify-content:center; flex-direction:column; z-index: 200; cursor: pointer;}
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+</head>
+<body>
+
+<div id="start-screen">
+    <h1 style="font-size:48px;">VOXEL HORROR</h1>
+    <p>Кликните для начала. В наушниках страшнее.</p>
+    <p>Управление: WASD, ЛКМ/ПКМ, Space, Shift, E (Инвентарь)</p>
+</div>
+
+<div id="ui-layer">
+    <div class="crosshair">+</div>
+    <div class="bar-container">
+        <div class="bar"><div class="bar-fill" id="health-fill"></div></div>
+        <div class="bar" id="breath-bar" style="display:none;"><div class="bar-fill" id="breath-fill"></div></div>
+        <div class="bar"><div class="bar-fill" id="stamina-fill"></div></div>
+    </div>
+    <div id="stats">
+        Время: <span id="time-display">День</span><br>
+        Замечен монстром: <span id="noticed-count">0</span><br>
+        Смертей: <span id="death-count">0</span>
+    </div>
+</div>
+
+<div id="hotbar"></div>
+<div id="inventory-screen">
+    <h2 style="color:white; margin-bottom: 20px;">Инвентарь и Крафт</h2>
+    <div class="inv-container">
+        <div class="crafting-area">
+            <div>
+                <div class="inv-title">Крафт (2x2)</div>
+                <div class="crafting-grid" id="craft-grid"></div>
+            </div>
+            <div class="craft-arrow">→</div>
+            <div>
+                <div class="inv-title">Результат</div>
+                <div class="slot" id="craft-result" onclick="app.inventory.craftResultClick()"></div>
+            </div>
+        </div>
+        <div class="inv-title">Рюкзак</div>
+        <div id="inv-main"></div>
+    </div>
+    <p style="color:white; margin-top:10px;">ЛКМ: Взять/Положить предмет. (Рецепт: 2 доски = 4 палки, 1 палка+1 уголь = факел и т.д.)</p>
+</div>
+
+<div id="overlay"></div>
+
+<script>
+// ==========================================
+// 1. КОНСТАНТЫ И БАЗОВЫЕ НАСТРОЙКИ
+// ==========================================
+const WORLD_SIZE = { x: 128, y: 64, z: 128 };
+const CHUNK_SIZE = 32; 
+const BLOCKS = { AIR: 0, DIRT: 1, GRASS: 2, STONE: 3, WOOD: 4, LEAVES: 5, PLANKS: 6, COAL: 7, TORCH: 8, WATER: 9, WORKBENCH: 10, HEART: 11, KNIFE: 12, STICK: 13, CHEST: 14 };
+const RECIPES = [
+    { in: [BLOCKS.WOOD,0,0,0], out: BLOCKS.PLANKS, count: 4 },
+    { in: [BLOCKS.PLANKS,0,BLOCKS.PLANKS,0], out: BLOCKS.STICK, count: 4 },
+    { in: [BLOCKS.COAL,0,BLOCKS.STICK,0], out: BLOCKS.TORCH, count: 4 },
+    { in: [BLOCKS.PLANKS,BLOCKS.PLANKS,BLOCKS.PLANKS,BLOCKS.PLANKS], out: BLOCKS.WORKBENCH, count: 1 },
+    { in: [BLOCKS.STONE,0,BLOCKS.STICK,0], out: BLOCKS.KNIFE, count: 1 } // Простейший нож
+];
+
+// Простой генератор псевдослучайных чисел
+let seed = Math.random();
+function random() { let x = Math.sin(seed++) * 10000; return x - Math.floor(x); }
+function noise(x, z) {
+    let nx = x * 0.05, nz = z * 0.05;
+    return (Math.sin(nx) + Math.sin(nz) + Math.sin(nx+nz)*0.5) * 5 + 35;
+}
+
+// ==========================================
+// 2. АУДИО ДВИЖОК (Web Audio API)
+// ==========================================
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const AudioEngine = {
+    playTone: function(freq, type, duration, vol=0.1) {
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        let osc = audioCtx.createOscillator();
+        let gain = audioCtx.createGain();
+        osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
+    },
+    step: function(isWater) { this.playTone(isWater ? 150 : 300, 'square', 0.1, 0.05); },
+    dig: function() { this.playTone(100, 'sawtooth', 0.2, 0.1); },
+    monsterBreathe: function() { this.playTone(50, 'triangle', 1.5, 0.2); },
+    whisper: function() { this.playTone(800 + random()*400, 'sine', 0.5, 0.05); },
+    damage: function() { this.playTone(150, 'sawtooth', 0.3, 0.3); }
+};
+
+// ==========================================
+// 3. ГЕНЕРАТОР ТЕКСТУР (Canvas)
+// ==========================================
+function createTex(type) {
+    let canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16;
+    let ctx = canvas.getContext('2d');
+    let color1, color2;
+    if(type===BLOCKS.DIRT) { color1='#5d4037'; color2='#4e342e'; }
+    if(type===BLOCKS.GRASS) { color1='#388e3c'; color2='#2e7d32'; }
+    if(type===BLOCKS.STONE) { color1='#757575'; color2='#616161'; }
+    if(type===BLOCKS.WOOD) { color1='#3e2723'; color2='#4e342e'; }
+    if(type===BLOCKS.LEAVES) { color1='#1b5e20'; color2='#145a14'; }
+    if(type===BLOCKS.PLANKS) { color1='#8d6e63'; color2='#795548'; }
+    if(type===BLOCKS.COAL) { color1='#212121'; color2='#000000'; }
+    if(type===BLOCKS.CHEST) { color1='#fbc02d'; color2='#f57f17'; }
+    if(type===BLOCKS.WORKBENCH) { color1='#5c4033'; color2='#8b5a2b'; }
+    
+    ctx.fillStyle = color1; ctx.fillRect(0,0,16,16);
+    ctx.fillStyle = color2;
+    for(let i=0; i<16; i++) {
+        let x=Math.floor(random()*16), y=Math.floor(random()*16);
+        ctx.fillRect(x,y,2,2);
+    }
+    
+    // Специальные текстуры
+    if(type===BLOCKS.GRASS) { ctx.fillStyle='#5d4037'; ctx.fillRect(0,8,16,8); } // Низ травы - земля
+    if(type===BLOCKS.WATER) { ctx.fillStyle='rgba(30,136,229,0.7)'; ctx.fillRect(0,0,16,16); }
+    if(type===BLOCKS.TORCH) { ctx.clearRect(0,0,16,16); ctx.fillStyle='#ffb300'; ctx.fillRect(6,2,4,4); ctx.fillStyle='#5d4037'; ctx.fillRect(7,6,2,10); }
+
+    let tex = new THREE.CanvasTexture(canvas);
+    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+    return tex;
+}
+
+// Материалы
+const materials = {};
+[BLOCKS.DIRT, BLOCKS.GRASS, BLOCKS.STONE, BLOCKS.WOOD, BLOCKS.LEAVES, BLOCKS.PLANKS, BLOCKS.COAL, BLOCKS.WORKBENCH, BLOCKS.CHEST].forEach(id => {
+    materials[id] = new THREE.MeshStandardMaterial({ map: createTex(id), roughness: 0.9 });
+});
+materials[BLOCKS.WATER] = new THREE.MeshStandardMaterial({ map: createTex(BLOCKS.WATER), transparent: true, opacity: 0.7, side: THREE.DoubleSide });
+materials[BLOCKS.TORCH] = new THREE.MeshBasicMaterial({ map: createTex(BLOCKS.TORCH), transparent: true });
+
+// ==========================================
+// 4. ДВИЖОК ИГРЫ (Основной класс)
+// ==========================================
+class VoxelGame {
+    constructor() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x87CEEB);
+        this.scene.fog = new THREE.FogExp2(0x87CEEB, 0.02);
+        
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 150);
+        this.renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: false });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        // Освещение
+        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        this.scene.add(this.ambientLight);
+        this.dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        this.dirLight.position.set(50, 100, 50);
+        this.dirLight.castShadow = true;
+        this.dirLight.shadow.camera.left = -60; this.dirLight.shadow.camera.right = 60;
+        this.dirLight.shadow.camera.top = 60; this.dirLight.shadow.camera.bottom = -60;
+        this.scene.add(this.dirLight);
+
+        // Факелы (Динамические источники, пул 10 шт)
+        this.torches = [];
+        for(let i=0; i<10; i++) {
+            let l = new THREE.PointLight(0xffaa00, 0, 15);
+            l.castShadow = true;
+            this.scene.add(l);
+            this.torches.push({ light: l, active: false, pos: null });
+        }
+
+        // Данные мира
+        this.world = new Uint8Array(WORLD_SIZE.x * WORLD_SIZE.y * WORLD_SIZE.z);
+        this.instancedMeshes = {};
+        this.blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+        
+        // Система частиц (Летучие мыши, погода)
+        this.particles = new THREE.Group();
+        this.scene.add(this.particles);
+
+        this.initWorld();
+        
+        this.player = new Player(this);
+        this.inventory = new Inventory(this);
+        this.monster = new Monster(this);
+        this.dayNight = new DayNightCycle(this);
+        this.effects = new Effects(this);
+        
+        this.clock = new THREE.Clock();
+        this.running = false;
+        
+        this.setupEvents();
+    }
+
+    // Индексы массивов 1D
+    getIndex(x, y, z) { return x + WORLD_SIZE.x * (y + WORLD_SIZE.y * z); }
+    getBlock(x, y, z) {
+        if(x<0||y<0||z<0||x>=WORLD_SIZE.x||y>=WORLD_SIZE.y||z>=WORLD_SIZE.z) return 0;
+        return this.world[this.getIndex(x,y,z)];
+    }
+    setBlock(x, y, z, v) {
+        if(x<0||y<0||z<0||x>=WORLD_SIZE.x||y>=WORLD_SIZE.y||z>=WORLD_SIZE.z) return;
+        this.world[this.getIndex(x,y,z)] = v;
+        this.updateChunk(x, y, z);
+    }
+
+    initWorld() {
+        console.log("Генерация мира...");
+        for (let x = 0; x < WORLD_SIZE.x; x++) {
+            for (let z = 0; z < WORLD_SIZE.z; z++) {
+                let h = Math.floor(noise(x, z));
+                for (let y = 0; y < WORLD_SIZE.y; y++) {
+                    let type = BLOCKS.AIR;
+                    if (y === 0) type = BLOCKS.STONE; // Bedrock
+                    else if (y < h - 3) type = BLOCKS.STONE;
+                    else if (y < h) type = BLOCKS.DIRT;
+                    else if (y === h) type = BLOCKS.GRASS;
+                    else if (y > h && y < 63 && h < 62) type = BLOCKS.WATER; // Озера
+
+                    // Пещеры (3D шум / рандом)
+                    if (y < h - 5 && random() > 0.85) type = BLOCKS.AIR;
+                    
+                    // Руда
+                    if (type === BLOCKS.STONE && random() > 0.95) type = BLOCKS.COAL;
+
+                    this.world[this.getIndex(x, y, z)] = type;
+                }
+                
+                // Деревья
+                if (h > 62 && this.getBlock(x, h, z) === BLOCKS.GRASS && random() > 0.98) {
+                    for(let ty=1; ty<=4; ty++) this.world[this.getIndex(x, h+ty, z)] = BLOCKS.WOOD;
+                    for(let lx=-1; lx<=1; lx++) for(let lz=-1; lz<=1; lz++) {
+                        if(x+lx>0 && x+lx<WORLD_SIZE.x && z+lz>0 && z+lz<WORLD_SIZE.z) {
+                            this.world[this.getIndex(x+lx, h+4, z+lz)] = BLOCKS.LEAVES;
+                            this.world[this.getIndex(x+lx, h+5, z+lz)] = BLOCKS.LEAVES;
+                        }
+                    }
+                }
+                
+                // Данжи с сундуками
+                if (h < 40 && random() > 0.99) {
+                    this.world[this.getIndex(x, h+1, z)] = BLOCKS.CHEST;
+                    for(let cx=-2; cx<=2; cx++) for(let cz=-2; cz<=2; cz++) 
+                        this.world[this.getIndex(x+cx, h, z+cz)] = BLOCKS.STONE; // Платформа
+                }
+            }
+        }
+        this.buildMeshes();
+    }
+
+    buildMeshes() {
+        // Очистка старых
+        for(let key in this.instancedMeshes) this.scene.remove(this.instancedMeshes[key]);
+        this.instancedMeshes = {};
+        
+        let counts = {};
+        for(let i=0; i<this.world.length; i++) {
+            let id = this.world[i];
+            if(id !== BLOCKS.AIR) counts[id] = (counts[id]||0) + 1;
+        }
+
+        let matrix = new THREE.Matrix4();
+        for(let id in counts) {
+            let mat = materials[id];
+            if(!mat) continue;
+            let mesh = new THREE.InstancedMesh(this.blockGeometry, mat, counts[id]);
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            this.instancedMeshes[id] = { mesh: mesh, index: 0 };
+            this.scene.add(mesh);
+        }
+
+        // Заполнение
+        for (let x = 0; x < WORLD_SIZE.x; x++) {
+            for (let z = 0; z < WORLD_SIZE.z; z++) {
+                for (let y = 0; y < WORLD_SIZE.y; y++) {
+                    let id = this.getBlock(x, y, z);
+                    if (id !== BLOCKS.AIR && materials[id]) {
+                        // Оптимизация: скрываем невидимые блоки (окруженные со всех 6 сторон непрозрачными)
+                        let visible = true;
+                        if(id !== BLOCKS.WATER && id !== BLOCKS.LEAVES && id !== BLOCKS.TORCH) {
+                            if( this.getBlock(x+1,y,z) && this.getBlock(x-1,y,z) &&
+                                this.getBlock(x,y+1,z) && this.getBlock(x,y-1,z) &&
+                                this.getBlock(x,y,z+1) && this.getBlock(x,y,z-1) ) {
+                                visible = false;
+                            }
+                        }
+                        
+                        let inst = this.instancedMeshes[id];
+                        if(visible) {
+                            matrix.setPosition(x, y, z);
+                            inst.mesh.setMatrixAt(inst.index, matrix);
+                        } else {
+                            matrix.makeScale(0,0,0); // Прячем
+                            inst.mesh.setMatrixAt(inst.index, matrix);
+                        }
+                        // Сохраняем индекс в world (старшие биты или отдельный массив? Для простоты перестроим чанк целиком при ломании, это дорого, но в рамках одного файла приемлемо. Лучше использовать локальное обновление).
+                        // Внимание: для экономии кода, при разрушении блока мы будем просто перестраивать весь мир.
+                        // На мощных ПК это займет ~100мс, что вызовет лаг. Сделаем хак:
+                        inst.index++;
+                    }
+                }
+            }
+        }
+        for(let id in this.instancedMeshes) this.instancedMeshes[id].mesh.instanceMatrix.needsUpdate = true;
+    }
+
+    updateChunk(x, y, z) {
+        // Упрощенный апдейт: полный ребилд мешей. Да, лагает, но 100% надежно без лишних 500 строк.
+        this.buildMeshes(); 
+        
+        // Обновление света факелов
+        if(this.getBlock(x,y,z) === BLOCKS.TORCH) {
+            let t = this.torches.find(t => !t.active);
+            if(t) { t.active = true; t.pos = {x,y,z}; t.light.position.set(x,y,z); t.light.intensity = 1; }
+        } else {
+            let t = this.torches.find(t => t.active && t.pos.x===x && t.pos.y===y && t.pos.z===z);
+            if(t) { t.active = false; t.light.intensity = 0; }
+        }
+    }
+
+    setupEvents() {
+        document.getElementById('start-screen').addEventListener('click', () => {
+            document.getElementById('start-screen').style.display = 'none';
+            this.player.controls.lock();
+            if(!this.running) { this.running = true; this.animate(); }
+        });
+        
+        window.addEventListener('resize', () => {
+            this.camera.aspect = window.innerWidth / window.innerHeight;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    }
+
+    animate() {
+        requestAnimationFrame(() => this.animate());
+        let dt = Math.min(this.clock.getDelta(), 0.1);
+
+        if(this.player.controls.isLocked) {
+            this.player.update(dt);
+            this.monster.update(dt);
+        }
+        this.dayNight.update(dt);
+        this.effects.update(dt);
+
+        this.renderer.render(this.scene, this.camera);
+    }
+}
+
+// ==========================================
+// 5. ИГРОК И ФИЗИКА
+// ==========================================
+class Player {
+    constructor(app) {
+        this.app = app;
+        this.controls = new THREE.PointerLockControls(app.camera, document.body);
+        
+        // Спавн
+        let startY = 64;
+        while(this.app.getBlock(64, startY, 64) === 0 && startY > 0) startY--;
+        this.spawnPoint = new THREE.Vector3(64, startY + 2, 64);
+        this.controls.getObject().position.copy(this.spawnPoint);
+        app.scene.add(this.controls.getObject());
+
+        this.velocity = new THREE.Vector3();
+        this.direction = new THREE.Vector3();
+        this.keys = { w:false, a:false, s:false, d:false, space:false, shift:false };
+        this.onGround = false;
+        
+        this.raycaster = new THREE.Raycaster();
+        
+        // Статы
+        this.hp = 100;
+        this.breath = 15;
+        this.stamina = 100;
+        this.isWater = false;
+
+        document.addEventListener('keydown', e => this.onKey(e, true));
+        document.addEventListener('keyup', e => this.onKey(e, false));
+        document.addEventListener('mousedown', e => this.onClick(e));
+        
+        // Инвентарь toggle
+        document.addEventListener('keydown', e => {
+            if(e.code === 'KeyE' || e.code === 'Tab') {
+                e.preventDefault();
+                if(this.controls.isLocked) {
+                    this.controls.unlock();
+                    document.getElementById('inventory-screen').style.display = 'flex';
+                    this.app.inventory.render();
+                } else {
+                    document.getElementById('inventory-screen').style.display = 'none';
+                    this.controls.lock();
+                }
+            }
+            // Горячие клавиши 1-9
+            if(e.key >= '1' && e.key <= '9') {
+                this.app.inventory.activeHotbar = parseInt(e.key) - 1;
+                this.app.inventory.renderHotbar();
+            }
+        });
+    }
+
+    onKey(e, state) {
+        switch(e.code) {
+            case 'KeyW': this.keys.w = state; break;
+            case 'KeyA': this.keys.a = state; break;
+            case 'KeyS': this.keys.s = state; break;
+            case 'KeyD': this.keys.d = state; break;
+            case 'Space': this.keys.space = state; break;
+            case 'ShiftLeft': this.keys.shift = state; break;
+        }
+    }
+
+    onClick(e) {
+        if(!this.controls.isLocked) return;
+        this.raycaster.setFromCamera(new THREE.Vector2(0,0), this.app.camera);
+        // Поиск пересечений вручную по сетке (Raymarching)
+        let pos = this.raycaster.ray.origin.clone();
+        let dir = this.raycaster.ray.direction.clone();
+        let hit = null, norm = null, prevPos = null;
+        
+        for(let i=0; i<6; i+=0.1) {
+            let p = pos.clone().addScaledVector(dir, i);
+            let x = Math.floor(p.x + 0.5), y = Math.floor(p.y + 0.5), z = Math.floor(p.z + 0.5);
+            let b = this.app.getBlock(x, y, z);
+            if(b !== BLOCKS.AIR && b !== BLOCKS.WATER) {
+                hit = {x, y, z, id:b};
+                // Вычисление нормали грубо
+                if(prevPos) {
+                    let px = Math.floor(prevPos.x + 0.5), py = Math.floor(prevPos.y + 0.5), pz = Math.floor(prevPos.z + 0.5);
+                    norm = { x: px-x, y: py-y, z: pz-z };
+                }
+                break;
+            }
+            prevPos = p;
+        }
+
+        if(hit) {
+            if(e.button === 0) { // Ломать
+                // Фишка 7: Усталость при ломании рукой
+                let isHand = this.app.inventory.getEquipped() === null;
+                if(isHand) {
+                    this.stamina -= 10;
+                    document.getElementById('gameCanvas').style.transform = 'translate(2px, 2px)';
+                    setTimeout(() => document.getElementById('gameCanvas').style.transform = 'none', 50);
+                }
+                
+                // Добавляем в инвентарь
+                this.app.inventory.add(hit.id, 1);
+                this.app.setBlock(hit.x, hit.y, hit.z, BLOCKS.AIR);
+                AudioEngine.dig();
+                
+            } else if(e.button === 2 && norm) { // Ставить
+                let item = this.app.inventory.getEquipped();
+                if(item && item.id !== BLOCKS.KNIFE) {
+                    this.app.setBlock(hit.x + norm.x, hit.y + norm.y, hit.z + norm.z, item.id);
+                    this.app.inventory.consumeActive();
+                    AudioEngine.step(false);
+                } else if(item && item.id === BLOCKS.KNIFE) {
+                    // Атака ножом
+                    if(this.app.monster.mesh.position.distanceTo(this.controls.getObject().position) < 3) {
+                        this.app.monster.stun = 2.0; // Стан монстра
+                        AudioEngine.damage();
+                    }
+                }
+            }
+        }
+    }
+
+    damage(amount) {
+        this.hp -= amount;
+        document.getElementById('health-fill').style.width = this.hp + '%';
+        document.getElementById('overlay').classList.add('damage-flash');
+        setTimeout(() => document.getElementById('overlay').classList.remove('damage-flash'), 300);
+        AudioEngine.damage();
+        if(this.hp <= 0) this.respawn();
+    }
+
+    respawn() {
+        this.hp = 100; this.breath = 15;
+        this.controls.getObject().position.copy(this.spawnPoint);
+        document.getElementById('health-fill').style.width = '100%';
+        this.app.effects.deathCount++;
+        document.getElementById('death-count').innerText = this.app.effects.deathCount;
+        // Фишка 5: 3 смерти - быстрее монстр
+        if(this.app.effects.deathCount >= 3) this.app.monster.baseSpeed *= 1.2;
+    }
+
+    checkCollision(pos) {
+        let x = Math.floor(pos.x + 0.5), y = Math.floor(pos.y), z = Math.floor(pos.z + 0.5);
+        // Проверяем блок в ногах и на уровне глаз
+        let b1 = this.app.getBlock(x, y, z);
+        let b2 = this.app.getBlock(x, y+1, z);
+        let solid = (b) => b !== 0 && b !== BLOCKS.WATER && b !== BLOCKS.TORCH;
+        if(solid(b1) || solid(b2)) return true;
+        return false;
+    }
+
+    update(dt) {
+        let pos = this.controls.getObject().position;
+        
+        // Вода
+        let headBlock = this.app.getBlock(Math.floor(pos.x+0.5), Math.floor(pos.y+0.5), Math.floor(pos.z+0.5));
+        this.isWater = headBlock === BLOCKS.WATER;
+        
+        if(this.isWater) {
+            document.getElementById('overlay').classList.add('water-overlay');
+            document.getElementById('breath-bar').style.display = 'block';
+            this.breath -= dt;
+            document.getElementById('breath-fill').style.width = (this.breath/15)*100 + '%';
+            if(this.breath <= 0) { this.damage(10 * dt); }
+        } else {
+            document.getElementById('overlay').classList.remove('water-overlay');
+            document.getElementById('breath-bar').style.display = 'none';
+            this.breath = 15;
+        }
+
+        // Физика
+        this.velocity.x -= this.velocity.x * 10.0 * dt;
+        this.velocity.z -= this.velocity.z * 10.0 * dt;
+        this.velocity.y -= 9.8 * 2.0 * dt; // Гравитация
+
+        if(this.isWater) { this.velocity.y *= 0.5; } // Плавное падение в воде
+
+        this.direction.z = Number(this.keys.w) - Number(this.keys.s);
+        this.direction.x = Number(this.keys.d) - Number(this.keys.a);
+        this.direction.normalize();
+
+        // Усталость (Фишка 4)
+        let isRunning = this.keys.shift && this.keys.w && !this.isWater;
+        let speed = isRunning ? 8 : 4;
+        if(this.isWater) speed = 2;
+        
+        if(isRunning) {
+            this.stamina -= dt * 10;
+            if(this.stamina < 0) { this.stamina = 0; speed = 2; }
+            // Тряска камеры
+            this.app.camera.position.y += Math.sin(this.app.clock.getElapsedTime()*15)*0.05;
+        } else {
+            this.stamina += dt * 5;
+            if(this.stamina > 100) this.stamina = 100;
+        }
+        document.getElementById('stamina-fill').style.width = this.stamina + '%';
+
+        if(this.direction.z !== 0 || this.direction.x !== 0) {
+            this.velocity.z -= this.direction.z * speed * dt * 40.0;
+            this.velocity.x -= this.direction.x * speed * dt * 40.0;
+            // Звук шагов
+            if(this.onGround && Math.random() < 0.05) AudioEngine.step(this.isWater);
+        }
+
+        // Прыжок
+        if(this.keys.space && this.onGround && !this.isWater) {
+            this.velocity.y = 8; this.onGround = false;
+        } else if(this.keys.space && this.isWater) {
+            this.velocity.y = 4; // Всплытие
+        }
+
+        // Применение движения с простой коллизией
+        this.controls.moveRight(-this.velocity.x * dt);
+        if(this.checkCollision(pos)) this.controls.moveRight(this.velocity.x * dt); // Откат
+
+        this.controls.moveForward(-this.velocity.z * dt);
+        if(this.checkCollision(pos)) this.controls.moveForward(this.velocity.z * dt); // Откат
+
+        pos.y += this.velocity.y * dt;
+        if(this.checkCollision(pos)) {
+            pos.y -= this.velocity.y * dt; // Откат
+            this.velocity.y = 0;
+            this.onGround = true;
+        } else {
+            this.onGround = false;
+        }
+        
+        // Ограничение мира
+        if(pos.y < 0) this.respawn();
+        if(pos.x < 0) pos.x = 0; if(pos.x > WORLD_SIZE.x) pos.x = WORLD_SIZE.x;
+        if(pos.z < 0) pos.z = 0; if(pos.z > WORLD_SIZE.z) pos.z = WORLD_SIZE.z;
+    }
+}
+
+// ==========================================
+// 6. ИНВЕНТАРЬ И КРАФТ
+// ==========================================
+class Inventory {
+    constructor(app) {
+        this.app = app;
+        this.slots = new Array(36).fill(null); // 0-8 хотбар, 9-35 рюкзак
+        this.craftSlots = new Array(4).fill(null);
+        this.activeHotbar = 0;
+        
+        // Стартовый лут
+        this.add(BLOCKS.WOOD, 10);
+        this.add(BLOCKS.DIRT, 5);
+        
+        this.initUI();
+    }
+
+    add(id, count) {
+        // Ищем существующий стак
+        for(let i=0; i<this.slots.length; i++) {
+            if(this.slots[i] && this.slots[i].id === id && this.slots[i].count < 64) {
+                let add = Math.min(count, 64 - this.slots[i].count);
+                this.slots[i].count += add;
+                count -= add;
+                if(count <= 0) return;
+            }
+        }
+        // Ищем пустой слот
+        for(let i=0; i<this.slots.length; i++) {
+            if(!this.slots[i]) {
+                this.slots[i] = { id: id, count: count };
+                return;
+            }
+        }
+    }
+
+    getEquipped() { return this.slots[this.activeHotbar]; }
+    
+    consumeActive() {
+        if(this.slots[this.activeHotbar]) {
+            this.slots[this.activeHotbar].count--;
+            if(this.slots[this.activeHotbar].count <= 0) this.slots[this.activeHotbar] = null;
+            this.renderHotbar();
+        }
+    }
+
+    initUI() {
+        let main = document.getElementById('inv-main');
+        for(let i=0; i<4; i++) {
+            let row = document.createElement('div'); row.className = 'inv-row';
+            for(let j=0; j<9; j++) {
+                let idx = i*9 + j;
+                let slot = document.createElement('div'); slot.className = 'slot';
+                slot.onclick = () => this.slotClick('main', idx);
+                row.appendChild(slot);
+            }
+            main.appendChild(row);
+        }
+        let craft = document.getElementById('craft-grid');
+        for(let i=0; i<4; i++) {
+            let slot = document.createElement('div'); slot.className = 'slot';
+            slot.onclick = () => this.slotClick('craft', i);
+            craft.appendChild(slot);
+        }
+        this.selectedBuffer = null; // Для перетаскивания (просто клик-клик)
+    }
+
+    slotClick(type, idx) {
+        let arr = type === 'main' ? this.slots : this.craftSlots;
+        if(this.selectedBuffer) {
+            // Кладём
+            if(!arr[idx]) arr[idx] = this.selectedBuffer;
+            else if(arr[idx].id === this.selectedBuffer.id) arr[idx].count += this.selectedBuffer.count;
+            else { let temp = arr[idx]; arr[idx] = this.selectedBuffer; this.selectedBuffer = temp; return; }
+            this.selectedBuffer = null;
+        } else {
+            // Берем
+            if(arr[idx]) { this.selectedBuffer = arr[idx]; arr[idx] = null; }
+        }
+        this.checkCrafting();
+        this.render();
+    }
+
+    checkCrafting() {
+        let recipeIn = this.craftSlots.map(s => s ? s.id : 0);
+        let resSlot = document.getElementById('craft-result');
+        this.currentResult = null;
+        resSlot.innerHTML = '';
+        
+        for(let r of RECIPES) {
+            if(JSON.stringify(r.in) === JSON.stringify(recipeIn)) {
+                this.currentResult = r;
+                resSlot.innerHTML = `<div style="background:${this.getColor(r.out)}; width:80%; height:80%;"></div><span class="count">${r.count}</span>`;
+                return;
+            }
+        }
+    }
+
+    craftResultClick() {
+        if(this.currentResult) {
+            this.add(this.currentResult.out, this.currentResult.count);
+            // Уменьшаем ресурсы
+            for(let i=0; i<4; i++) {
+                if(this.craftSlots[i]) {
+                    this.craftSlots[i].count--;
+                    if(this.craftSlots[i].count <= 0) this.craftSlots[i] = null;
+                }
+            }
+            this.checkCrafting();
+            this.render();
+        }
+    }
+
+    getColor(id) {
+        let m = { [BLOCKS.DIRT]:'#5d4037', [BLOCKS.STONE]:'#757575', [BLOCKS.WOOD]:'#3e2723', [BLOCKS.PLANKS]:'#8d6e63', [BLOCKS.COAL]:'#000', [BLOCKS.STICK]:'#8b5a2b', [BLOCKS.TORCH]:'#ffb300', [BLOCKS.WORKBENCH]:'#5c4033', [BLOCKS.KNIFE]:'#bdc3c7' };
+        return m[id] || '#fff';
+    }
+
+    render() {
+        let mainRows = document.getElementById('inv-main').children;
+        for(let i=0; i<36; i++) {
+            let row = Math.floor(i/9), col = i%9;
+            let div = mainRows[row].children[col];
+            div.innerHTML = this.slots[i] ? `<div style="background:${this.getColor(this.slots[i].id)}; width:80%; height:80%;"></div><span class="count">${this.slots[i].count}</span>` : '';
+            div.style.borderColor = (this.selectedBuffer && !this.slots[i]) ? 'yellow' : '#888';
+        }
+        let craftGrid = document.getElementById('craft-grid').children;
+        for(let i=0; i<4; i++) {
+            craftGrid[i].innerHTML = this.craftSlots[i] ? `<div style="background:${this.getColor(this.craftSlots[i].id)}; width:80%; height:80%;"></div><span class="count">${this.craftSlots[i].count}</span>` : '';
+        }
+        this.renderHotbar();
+    }
+
+    renderHotbar() {
+        let hb = document.getElementById('hotbar');
+        hb.innerHTML = '';
+        for(let i=0; i<9; i++) {
+            let slot = document.createElement('div');
+            slot.className = 'slot' + (i === this.activeHotbar ? ' active' : '');
+            if(this.slots[i]) {
+                slot.innerHTML = `<div style="background:${this.getColor(this.slots[i].id)}; width:80%; height:80%;"></div><span class="count">${this.slots[i].count}</span>`;
+            }
+            hb.appendChild(slot);
+        }
+    }
+}
+
+// ==========================================
+// 7. МОНСТР (ИИ и Анимация)
+// ==========================================
+class Monster {
+    constructor(app) {
+        this.app = app;
+        // Модель Слендера/Паука
+        this.mesh = new THREE.Group();
+        let mat = new THREE.MeshBasicMaterial({ color: 0x000000 }); // Чёрный
+        let bodyGeo = new THREE.BoxGeometry(0.8, 2, 0.8);
+        this.body = new THREE.Mesh(bodyGeo, mat);
+        this.body.position.y = 1;
+        this.mesh.add(this.body);
+        
+        let eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        this.eyes = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 0.1), eyeMat);
+        this.eyes.position.set(0, 1.8, 0.45);
+        this.mesh.add(this.eyes);
+        
+        this.app.scene.add(this.mesh);
+        this.mesh.position.set(10, 65, 10); // Начальная позиция
+        
+        this.state = 'IDLE'; // IDLE, CHASE, DIG
+        this.baseSpeed = 1.0;
+        this.currentSpeed = 1.0;
+        this.noticedTimes = 0;
+        this.digTimer = 0;
+        this.stun = 0;
+        
+        this.raycaster = new THREE.Raycaster();
+    }
+
+    update(dt) {
+        if(this.stun > 0) { this.stun -= dt; return; }
+
+        let pPos = this.app.player.controls.getObject().position;
+        let mPos = this.mesh.position;
+        let dist = mPos.distanceTo(pPos);
+        
+        // Условия спавна: ночь или пещера
+        let isNight = this.app.dayNight.isNight;
+        let inCave = pPos.y < 30;
+        if(!isNight && !inCave) {
+            this.mesh.position.y = -100; // Прячем
+            return;
+        }
+
+        // Проверка прямой видимости
+        let dirToPlayer = pPos.clone().sub(mPos).normalize();
+        this.raycaster.set(mPos.clone().add(new THREE.Vector3(0,1,0)), dirToPlayer);
+        let inters = this.raycaster.intersectObjects(Object.values(this.app.instancedMeshes).map(i=>i.mesh));
+        let canSee = true;
+        if(inters.length > 0 && inters[0].distance < dist) canSee = false; // Блок мешает
+
+        // Фишка 6: Чувство взгляда
+        // Проверяем, смотрит ли игрок на монстра
+        let pDir = this.app.player.raycaster.ray.direction;
+        let lookDot = pDir.dot(dirToPlayer.clone().negate());
+        let playerLookingAtMonster = canSee && lookDot > 0.8 && dist < 30;
+
+        if(canSee && dist < 40) {
+            if(this.state !== 'CHASE') {
+                this.state = 'CHASE';
+                this.noticedTimes++;
+                document.getElementById('noticed-count').innerText = this.noticedTimes;
+                AudioEngine.whisper();
+            }
+            
+            // Фишка 2: Искажение экрана вблизи
+            if(dist < 10) document.getElementById('overlay').classList.add('distortion');
+            else document.getElementById('overlay').classList.remove('distortion');
+
+            // Ускорение
+            this.currentSpeed += dt * (playerLookingAtMonster ? 0.3 : 0.15); // x2 если смотрим
+            if(this.currentSpeed > this.baseSpeed * 2.5) this.currentSpeed = this.baseSpeed * 2.5;
+
+            // Движение к игроку (Простой вектор)
+            let moveVec = dirToPlayer.multiplyScalar(this.currentSpeed * dt);
+            
+            // Проверка коллизии монстра
+            let nextPos = mPos.clone().add(moveVec);
+            let nextBlock = this.app.getBlock(Math.floor(nextPos.x), Math.floor(nextPos.y+1), Math.floor(nextPos.z));
+            
+            if(nextBlock !== 0 && nextBlock !== BLOCKS.WATER) {
+                this.state = 'DIG';
+            } else {
+                this.mesh.position.copy(nextPos);
+                // Гравитация монстра
+                let floorY = Math.floor(mPos.y);
+                while(this.app.getBlock(Math.floor(mPos.x), floorY, Math.floor(mPos.z)) === 0 && floorY > 0) floorY--;
+                this.mesh.position.y = floorY + 1;
+            }
+
+            // Атака
+            if(dist < 2.5) {
+                this.app.player.damage(20);
+                // Откидывание
+                this.app.player.velocity.add(dirToPlayer.multiplyScalar(10));
+            }
+            
+            // Звук дыхания
+            if(Math.random() < 0.01) AudioEngine.monsterBreathe();
+
+        } else {
+            this.state = 'IDLE';
+            this.currentSpeed = this.baseSpeed;
+            document.getElementById('overlay').classList.remove('distortion');
+            
+            // Блуждание или ТП поближе, если слишком далеко
+            if(dist > 50) {
+                let ang = Math.random() * Math.PI * 2;
+                let nx = pPos.x + Math.cos(ang) * 20;
+                let nz = pPos.z + Math.sin(ang) * 20;
+                let ny = pPos.y;
+                if(this.app.getBlock(Math.floor(nx), Math.floor(ny), Math.floor(nz)) === 0) {
+                    this.mesh.position.set(nx, ny, nz);
+                }
+            }
+        }
+
+        // Ломание блоков
+        if(this.state === 'DIG') {
+            this.digTimer += dt;
+            if(this.digTimer > 2.0) {
+                this.digTimer = 0;
+                let bx = Math.floor(mPos.x + dirToPlayer.x);
+                let by = Math.floor(mPos.y + 1);
+                let bz = Math.floor(mPos.z + dirToPlayer.z);
+                if(this.app.getBlock(bx,by,bz) !== 0) {
+                    this.app.setBlock(bx,by,bz, 0); // Ломает блок
+                    AudioEngine.dig();
+                }
+                this.state = 'CHASE'; // Пытаемся снова идти
+            }
+        }
+
+        // Анимация ходьбы
+        if(this.state === 'CHASE') {
+            this.mesh.rotation.y = Math.atan2(dirToPlayer.x, dirToPlayer.z);
+            this.body.position.y = 1 + Math.sin(this.app.clock.getElapsedTime() * 10) * 0.1;
+        }
+    }
+}
+
+// ==========================================
+// 8. ДЕНЬ/НОЧЬ И ЭФФЕКТЫ
+// ==========================================
+class DayNightCycle {
+    constructor(app) {
+        this.app = app;
+        this.cycleDuration = 240; // 4 минуты (240 сек)
+        this.time = 0;
+        this.isNight = false;
+        
+        // Звёзды
+        let starGeo = new THREE.BufferGeometry();
+        let starPos = [];
+        for(let i=0; i<500; i++) {
+            starPos.push((Math.random()-0.5)*200, Math.random()*100+50, (Math.random()-0.5)*200);
+        }
+        starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+        this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({color: 0xffffff, size: 0.5}));
+        this.app.scene.add(this.stars);
+    }
+
+    update(dt) {
+        this.time = (this.time + dt) % this.cycleDuration;
+        let progress = this.time / this.cycleDuration; // 0 - 1
+        
+        // 0-0.5 День, 0.5-1.0 Ночь
+        this.isNight = progress > 0.5;
+        document.getElementById('time-display').innerText = this.isNight ? 'Ночь' : 'День';
+        document.getElementById('time-display').style.color = this.isNight ? '#5555ff' : '#ffff55';
+
+        // Плавная смена цвета
+        let sunAngle = progress * Math.PI * 2;
+        this.app.dirLight.position.x = Math.cos(sunAngle) * 100;
+        this.app.dirLight.position.y = Math.sin(sunAngle) * 100;
+        
+        let intensity = Math.sin(sunAngle);
+        if(intensity < 0.1) intensity = 0.1; // Лунный свет
+        this.app.dirLight.intensity = intensity;
+
+        if(!this.isNight) {
+            this.app.scene.background.lerpColors(new THREE.Color(0x000011), new THREE.Color(0x87CEEB), intensity);
+            this.app.scene.fog.color.copy(this.app.scene.background);
+            this.app.scene.fog.density = 0.02; // Обычный туман
+            this.app.ambientLight.intensity = 0.6;
+            this.stars.material.opacity = 0;
+        } else {
+            // Ночь: Динамический туман (Фишка 1)
+            let fogFactor = (Math.sin(this.time * 0.1) + 1) * 0.5; // 0..1
+            let nightFogColor = new THREE.Color(0x000033).lerp(new THREE.Color(0x000000), fogFactor);
+            this.app.scene.background.lerpColors(new THREE.Color(0x87CEEB), nightFogColor, 1 - intensity);
+            this.app.scene.fog.color.copy(this.app.scene.background);
+            this.app.scene.fog.density = 0.04 + fogFactor * 0.04; // Густеет
+            this.app.ambientLight.intensity = 0.1;
+            this.stars.material.opacity = 1;
+            this.stars.rotation.y += dt * 0.01;
+        }
+        this.stars.material.transparent = true;
+    }
+}
+
+class Effects {
+    constructor(app) {
+        this.app = app;
+        this.deathCount = 0;
+        this.standTimer = 0;
+        
+        // Фишка 6: Летучие мыши (Частицы)
+        let batGeo = new THREE.BufferGeometry();
+        this.batCount = 30;
+        let pos = new Float32Array(this.batCount * 3);
+        for(let i=0;i<this.batCount*3;i++) pos[i] = (Math.random()-0.5)*100;
+        batGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        this.bats = new THREE.Points(batGeo, new THREE.PointsMaterial({color: 0x000000, size: 0.5}));
+        this.app.scene.add(this.bats);
+    }
+    
+    update(dt) {
+        let pPos = this.app.player.controls.getObject().position;
+        
+        // Фишка 3: Звуки в пещерах
+        if(pPos.y < 30 && Math.random() < 0.001) {
+            AudioEngine.whisper();
+        }
+
+        // Фишка 4: Тени при стоянии
+        if(this.app.player.direction.lengthSq() === 0) {
+            this.standTimer += dt;
+            if(this.standTimer > 5.0) {
+                document.getElementById('overlay').classList.add('vignette');
+            }
+        } else {
+            this.standTimer = 0;
+            document.getElementById('overlay').classList.remove('vignette');
+        }
+
+        // Анимация летучих мышей
+        if(this.app.dayNight.isNight) {
+            this.bats.visible = true;
+            let positions = this.bats.geometry.attributes.position.array;
+            for(let i=0; i<this.batCount; i++) {
+                positions[i*3] += Math.sin(this.app.clock.elapsedTime + i)*0.1;
+                positions[i*3+1] += Math.cos(this.app.clock.elapsedTime + i)*0.1;
+                if(positions[i*3+1] > 60) positions[i*3+1] = 30; // Возврат вниз
+            }
+            this.bats.geometry.attributes.position.needsUpdate = true;
+        } else {
+            this.bats.visible = false;
+        }
+    }
+}
+
+// Запуск
+const app = new VoxelGame();
+
+</script>
+</body>
+</html>
